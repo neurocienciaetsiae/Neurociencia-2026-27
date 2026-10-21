@@ -1,0 +1,3 @@
+timestamp_lsl,elapsed_s,trust_value,workload_value,fatigue_value,phase,block,trial,condition,current_marker
+882876.7473962,0.0,50.0,,,IDLE,0,0,,WELCOME
+882880.1729533,3.4255570999812335,50.0,,,CALIBRATION,0,0,,CALIBRATION_START_EYES_CLOSED
