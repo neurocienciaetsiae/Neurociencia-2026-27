@@ -1,0 +1,50 @@
+# Neurociencia 2026–2027
+
+Repositorio con tres flujos de trabajo relacionados con el proyecto ATC Trust: una aplicación de adquisición y análisis en tiempo real, herramientas para exportar datos de la tarea y un preprocesador de eye tracking. Las grabaciones y los resultados exportados se conservan en el repositorio como datos del proyecto.
+
+## Estructura
+
+```text
+.
+├── ATCO_trust_project/            Aplicación multimodal en tiempo real y sus dependencias
+├── ATC_EXTRACTOR/                 Extracción, validación y exportación de datos de la tarea
+│   ├── raw_csv/                   Exportaciones originales de la tarea
+│   ├── personality_csv/           Respuestas de cuestionarios
+│   ├── scripts/                   Variantes de la tarea Trust ATC
+│   └── output/                    Libros Excel exportados
+├── Códigos para preprocesado/     Preprocesador de datos de eye tracking en Excel
+├── docs/references/               Artículos y material de referencia
+└── recordings/                    Sesiones registradas por la aplicación
+```
+
+`ATC_EXTRACTOR/rt_validation_*.csv` contiene informes de validación. Los datos de `recordings/`, los CSV de entrada y los Excel exportados son artefactos del análisis; no se ignoran automáticamente.
+
+## Aplicación en tiempo real
+
+Ejecuta los comandos desde la raíz del repositorio. La aplicación escribe las sesiones nuevas en `recordings/` mediante una ruta relativa al directorio actual.
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install -r ATCO_trust_project/requirements.txt
+python ATCO_trust_project/main.py
+```
+
+## Extracción y validación
+
+Los scripts del extractor usan rutas relativas (`raw_csv/`, `personality_csv/` y `output/`), así que ejecútalos desde `ATC_EXTRACTOR/`:
+
+```bash
+cd ATC_EXTRACTOR
+python extractor.py
+```
+
+El procesamiento que incorpora cuestionarios está en `process_data_with_personality.py`; la validación está en `validator.py`. Las variantes de la tarea están en `scripts/`.
+
+## Preprocesamiento de eye tracking
+
+Ejecuta `Códigos para preprocesado/Preprocesado_ET.py`. El programa permite seleccionar un libro Excel y guarda junto a él otro libro con los datos limpios, parpadeos y sacadas.
+
+## Higiene del repositorio
+
+`.gitignore` excluye metadatos de macOS, bytecode de Python y entornos virtuales. Los datos experimentales y los resultados exportados siguen versionados; revisa su contenido antes de añadir nuevas grabaciones o exportaciones.
