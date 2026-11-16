@@ -12,6 +12,7 @@ DEFAULT_INPUT_DIR = Path("output")
 DEFAULT_OUTPUT_DIR = Path("output")
 BLOCKS_H1 = [2, 3, 4, 5]
 PHASES_H1 = ["NEUTRAL", "ECOLOGICAL"]
+RESULTS_XLSX_NAME = "h1_trust_results.xlsx"
 
 
 def parse_args() -> argparse.Namespace:
@@ -224,6 +225,7 @@ def main() -> None:
     desc_path = args.output_dir / "h1_trust_descriptives.csv"
     anova_path = args.output_dir / "h1_trust_anova_table.csv"
     contrasts_path = args.output_dir / "h1_trust_contrasts.csv"
+    xlsx_path = args.output_dir / RESULTS_XLSX_NAME
 
     complete_means.sort_values(["participant", "phase", "block"]).to_csv(
         cell_means_path, index=False
@@ -231,6 +233,16 @@ def main() -> None:
     desc.to_csv(desc_path, index=False)
     anova_table.to_csv(anova_path, index=False)
     contrasts.to_csv(contrasts_path, index=False)
+
+    with pd.ExcelWriter(xlsx_path, engine="openpyxl") as writer:
+        complete_means.sort_values(["participant", "phase", "block"]).to_excel(
+            writer,
+            sheet_name="cell_means",
+            index=False,
+        )
+        desc.to_excel(writer, sheet_name="descriptives", index=False)
+        anova_table.to_excel(writer, sheet_name="anova", index=False)
+        contrasts.to_excel(writer, sheet_name="contrasts", index=False)
 
     print("=== H1: Confianza por bloque ===")
     print(f"Participantes incluidos (completos): {len(complete_participants)}")
@@ -244,6 +256,7 @@ def main() -> None:
     print(f"- {desc_path}")
     print(f"- {anova_path}")
     print(f"- {contrasts_path}")
+    print(f"- {xlsx_path}")
 
 
 if __name__ == "__main__":
