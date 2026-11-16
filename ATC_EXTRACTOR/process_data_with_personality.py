@@ -230,6 +230,14 @@ def extract_trials(dataframe, participant, session, phase):
         return pd.DataFrame(columns=TRIAL_COLUMNS)
 
     trials = dataframe.loc[dataframe["block"].notna()].copy()
+    if "block_trial" in trials.columns:
+        trials = trials.loc[
+            pd.to_numeric(trials["block_trial"], errors="coerce").notna()
+        ].copy()
+
+    if trials.empty:
+        return pd.DataFrame(columns=TRIAL_COLUMNS)
+
     high_trust = get_optional_column(trials, "answ_high_question")
     low_trust = get_optional_column(trials, "answ_low_question")
     trials["trust"] = high_trust.combine_first(low_trust)
@@ -257,7 +265,11 @@ def extract_trials(dataframe, participant, session, phase):
     output["trust"] = trials["trust"]
     output["trial_rt"] = trials["trial_rt"]
     output["trust_rt"] = trials["trust_rt"]
-    output["block"] = make_one_based(output["block"])
+
+    trial_numbers = pd.to_numeric(output["trial"], errors="coerce")
+    block_starts = trial_numbers.shift(1).isna() | trial_numbers.le(trial_numbers.shift(1))
+    output["block"] = block_starts.cumsum().astype("Int64")
+
     output["trial"] = output.groupby("block", dropna=False)["trial"].transform(make_one_based)
     return output[TRIAL_COLUMNS].reset_index(drop=True)
 

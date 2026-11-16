@@ -428,6 +428,23 @@ def extract_trials(
         dataframe["block"].notna()
     ].copy()
 
+    # Keep only real trial rows.
+    # Some files contain extra rows tagged with a block value but without
+    # block_trial (questionnaires/ratings). Those rows should not be part of
+    # the TRIALS table.
+    if "block_trial" in trials.columns:
+        trials = trials.loc[
+            pd.to_numeric(
+                trials["block_trial"],
+                errors="coerce",
+            ).notna()
+        ].copy()
+
+    if trials.empty:
+        return pd.DataFrame(
+            columns=TRIAL_COLUMNS
+        )
+
     high_trust = get_optional_column(
         trials,
         "answ_high_question",
@@ -480,9 +497,23 @@ def extract_trials(
     output["trial_rt"] = trials["trial_rt"]
     output["trust_rt"] = trials["trust_rt"]
 
-    # Ensure block numbering starts at 1.
-    output["block"] = make_one_based(
-        output["block"]
+    # Rebuild block numbering from trial sequence order.
+    # This fixes malformed labels like 2,3,4,4,6 and guarantees 1..N.
+    trial_numbers = pd.to_numeric(
+        output["trial"],
+        errors="coerce",
+    )
+
+    block_starts = (
+        trial_numbers.shift(1).isna()
+        | trial_numbers.le(
+            trial_numbers.shift(1)
+        )
+    )
+
+    output["block"] = (
+        block_starts.cumsum()
+        .astype("Int64")
     )
 
     # Ensure trial numbering starts at 1 inside each block.

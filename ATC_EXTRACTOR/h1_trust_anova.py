@@ -120,6 +120,38 @@ def keep_complete_participants(cell_means: pd.DataFrame) -> tuple[pd.DataFrame, 
     return complete, complete_participants
 
 
+def build_completeness_report(
+    raw_data: pd.DataFrame,
+    cell_means: pd.DataFrame,
+) -> pd.DataFrame:
+    participants = sorted(raw_data["participant"].dropna().astype(str).unique())
+
+    expected = pd.MultiIndex.from_product(
+        [participants, PHASES_H1, BLOCKS_H1],
+        names=["participant", "phase", "block"],
+    ).to_frame(index=False)
+
+    available = cell_means[["participant", "phase", "block"]].copy()
+    available["has_data"] = True
+
+    report = expected.merge(
+        available,
+        on=["participant", "phase", "block"],
+        how="left",
+    )
+    report["has_data"] = report["has_data"].eq(True)
+
+    counts = (
+        report.groupby("participant", as_index=False)["has_data"]
+        .sum()
+        .rename(columns={"has_data": "n_cells_with_data"})
+    )
+
+    report = report.merge(counts, on="participant", how="left")
+    report["included_in_anova"] = report["n_cells_with_data"] == (len(PHASES_H1) * len(BLOCKS_H1))
+    return report
+
+
 def run_rm_anova(complete_means: pd.DataFrame) -> pd.DataFrame:
     try:
         statsmodels_anova = __import__(
@@ -215,6 +247,14 @@ def main() -> None:
     raw_data = load_trials_from_exports(args.input_dir, args.pattern)
     cell_means = aggregate_mean_trust(raw_data)
     complete_means, complete_participants = keep_complete_participants(cell_means)
+    completeness_report = build_completeness_report(raw_data, cell_means)
+
+    excluded_participants = sorted(
+        completeness_report.loc[
+            ~completeness_report["included_in_anova"],
+            "participant",
+        ].unique()
+    )
 
     if complete_means.empty:
         raise ValueError(
@@ -249,10 +289,13 @@ def main() -> None:
         desc.to_excel(writer, sheet_name="descriptives", index=False)
         anova_table.to_excel(writer, sheet_name="anova", index=False)
         contrasts.to_excel(writer, sheet_name="contrasts", index=False)
+        completeness_report.to_excel(writer, sheet_name="sample_qc", index=False)
 
     print("=== H1: Confianza por bloque ===")
     print(f"Participantes incluidos (completos): {len(complete_participants)}")
     print(f"Participantes excluidos: {cell_means['participant'].nunique() - len(complete_participants)}")
+    if excluded_participants:
+        print(f"IDs excluidos por celdas faltantes: {', '.join(excluded_participants)}")
     print("\nANOVA intrasujetos Fase(2) x Bloque(4):")
     print(anova_table.to_string(index=False))
     print("\nContrastes a priori:")
