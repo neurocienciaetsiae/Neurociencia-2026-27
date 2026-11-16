@@ -40,6 +40,11 @@ def parse_args() -> argparse.Namespace:
         default="P*_S*_*.xlsx",
         help="Patrón de ficheros Excel a procesar.",
     )
+    parser.add_argument(
+        "--export-csv",
+        action="store_true",
+        help="Si se activa, además del .xlsx también exporta CSV.",
+    )
     return parser.parse_args()
 
 
@@ -227,12 +232,13 @@ def main() -> None:
     contrasts_path = args.output_dir / "h1_trust_contrasts.csv"
     xlsx_path = args.output_dir / RESULTS_XLSX_NAME
 
-    complete_means.sort_values(["participant", "phase", "block"]).to_csv(
-        cell_means_path, index=False
-    )
-    desc.to_csv(desc_path, index=False)
-    anova_table.to_csv(anova_path, index=False)
-    contrasts.to_csv(contrasts_path, index=False)
+    if args.export_csv:
+        complete_means.sort_values(["participant", "phase", "block"]).to_csv(
+            cell_means_path, index=False
+        )
+        desc.to_csv(desc_path, index=False)
+        anova_table.to_csv(anova_path, index=False)
+        contrasts.to_csv(contrasts_path, index=False)
 
     with pd.ExcelWriter(xlsx_path, engine="openpyxl") as writer:
         complete_means.sort_values(["participant", "phase", "block"]).to_excel(
@@ -252,10 +258,11 @@ def main() -> None:
     print("\nContrastes a priori:")
     print(contrasts.to_string(index=False))
     print("\nArchivos guardados:")
-    print(f"- {cell_means_path}")
-    print(f"- {desc_path}")
-    print(f"- {anova_path}")
-    print(f"- {contrasts_path}")
+    if args.export_csv:
+        print(f"- {cell_means_path}")
+        print(f"- {desc_path}")
+        print(f"- {anova_path}")
+        print(f"- {contrasts_path}")
     print(f"- {xlsx_path}")
 
 
