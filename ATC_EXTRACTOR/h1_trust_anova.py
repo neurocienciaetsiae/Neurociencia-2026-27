@@ -111,13 +111,14 @@ def aggregate_mean_trust(data: pd.DataFrame) -> pd.DataFrame:
 
 
 def keep_complete_participants(cell_means: pd.DataFrame) -> tuple[pd.DataFrame, pd.Index]:
-    expected_cells = len(PHASES_H1) * len(BLOCKS_H1)
+    """Compatibility wrapper kept for older callers.
 
-    counts = cell_means.groupby("participant").size()
-    complete_participants = counts[counts == expected_cells].index
-
-    complete = cell_means[cell_means["participant"].isin(complete_participants)].copy()
-    return complete, complete_participants
+    The H1 analysis should retain all participants with at least one valid trust
+    cell; complete-case filtering drops valid participants and artificially
+    reduces the sample from 16 to 11. For repeated-measures analyses with
+    missing cells, Pingouin handles the unbalanced design directly.
+    """
+    return cell_means.copy(), pd.Index(cell_means["participant"].dropna().unique())
 
 
 def build_completeness_report(
@@ -148,33 +149,25 @@ def build_completeness_report(
     )
 
     report = report.merge(counts, on="participant", how="left")
-    report["included_in_anova"] = report["n_cells_with_data"] == (len(PHASES_H1) * len(BLOCKS_H1))
+    report["included_in_anova"] = report["n_cells_with_data"] > 0
     return report
 
 
 def run_rm_anova(complete_means: pd.DataFrame) -> pd.DataFrame:
     try:
-        statsmodels_anova = __import__(
-            "statsmodels.stats.anova",
-            fromlist=["AnovaRM"],
-        )
-        anova_rm = getattr(statsmodels_anova, "AnovaRM")
+        from pingouin import rm_anova
     except Exception as exc:
         raise ImportError(
-            "No se pudo importar statsmodels. Instala el paquete con: pip install statsmodels"
+            "No se pudo importar pingouin. Instala el paquete con: pip install pingouin"
         ) from exc
 
-    anova_data = complete_means.copy()
-    anova_data["block"] = anova_data["block"].astype(str)
-
-    model = anova_rm(
-        data=anova_data,
-        depvar="mean_trust",
-        subject="participant",
+    table = rm_anova(
+        data=complete_means,
+        dv="mean_trust",
         within=["phase", "block"],
+        subject="participant",
+        effsize="np2",
     )
-    fit = model.fit()
-    table = fit.anova_table.reset_index().rename(columns={"index": "effect"})
     return table
 
 
