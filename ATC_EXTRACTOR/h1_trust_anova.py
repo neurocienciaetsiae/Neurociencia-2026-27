@@ -8,6 +8,7 @@ import pandas as pd
 from scipy.stats import ttest_rel
 
 
+DEFAULT_INPUT_FILE = Path("datos_combinados.xlsx")
 DEFAULT_INPUT_DIR = Path("output")
 DEFAULT_OUTPUT_DIR = Path("output")
 BLOCKS_H1 = [2, 3, 4, 5]
@@ -23,10 +24,19 @@ def parse_args() -> argparse.Namespace:
         )
     )
     parser.add_argument(
+        "--input-file",
+        type=Path,
+        default=DEFAULT_INPUT_FILE,
+        help="Libro combinado con hoja TRIALS (por defecto: datos_combinados.xlsx).",
+    )
+    parser.add_argument(
         "--input-dir",
         type=Path,
-        default=DEFAULT_INPUT_DIR,
-        help="Directorio con los archivos Excel exportados (por defecto: output/).",
+        default=None,
+        help=(
+            "Directorio opcional con exportaciones individuales; si se indica, "
+            "se usa en lugar de --input-file."
+        ),
     )
     parser.add_argument(
         "--output-dir",
@@ -91,6 +101,36 @@ def load_trials_from_exports(input_dir: Path, pattern: str) -> pd.DataFrame:
         out["participant"].astype(str),
     )
 
+    return out
+
+
+def load_trials_from_combined(file_path: Path) -> pd.DataFrame:
+    try:
+        trials = pd.read_excel(file_path, sheet_name="TRIALS")
+    except Exception as exc:
+        raise ValueError(
+            f"No se pudo leer la hoja TRIALS de {file_path}: {exc}"
+        ) from exc
+
+    required = {"participant", "phase", "block", "trust"}
+    if not required.issubset(trials.columns):
+        missing = sorted(required.difference(trials.columns))
+        raise ValueError(
+            f"{file_path} no contiene las columnas requeridas en TRIALS: {missing}"
+        )
+
+    out = trials[["participant", "phase", "block", "trust"]].copy()
+    out["source_file"] = file_path.name
+    out["trust"] = pd.to_numeric(out["trust"], errors="coerce")
+    out["block"] = pd.to_numeric(out["block"], errors="coerce").astype("Int64")
+    out["phase"] = out["phase"].astype(str).str.upper().str.strip()
+
+    participant_numeric = pd.to_numeric(out["participant"], errors="coerce")
+    out["participant"] = np.where(
+        participant_numeric.notna(),
+        participant_numeric.astype("Int64").astype(str).str.zfill(3),
+        out["participant"].astype(str),
+    )
     return out
 
 
@@ -237,7 +277,12 @@ def main() -> None:
     args = parse_args()
     args.output_dir.mkdir(parents=True, exist_ok=True)
 
-    raw_data = load_trials_from_exports(args.input_dir, args.pattern)
+    if args.input_dir is not None:
+        raw_data = load_trials_from_exports(args.input_dir, args.pattern)
+        input_description = f"exportaciones de {args.input_dir}"
+    else:
+        raw_data = load_trials_from_combined(args.input_file)
+        input_description = str(args.input_file)
     cell_means = aggregate_mean_trust(raw_data)
     complete_means, complete_participants = keep_complete_participants(cell_means)
     completeness_report = build_completeness_report(raw_data, cell_means)
@@ -251,7 +296,7 @@ def main() -> None:
 
     if complete_means.empty:
         raise ValueError(
-            "No hay participantes completos para Fase(2) x Bloque(4). "
+            "No hay datos válidos para Fase(2) x Bloque(4). "
             "Revisa datos de trust en bloques 2, 3, 4 y 5 para NEUTRAL/ECOLOGICAL."
         )
 
@@ -285,7 +330,7 @@ def main() -> None:
         completeness_report.to_excel(writer, sheet_name="sample_qc", index=False)
 
     print("=== H1: Confianza por bloque ===")
-    print(f"Participantes incluidos (completos): {len(complete_participants)}")
+    print(f"Participantes incluidos: {len(complete_participants)}")
     print(f"Participantes excluidos: {cell_means['participant'].nunique() - len(complete_participants)}")
     if excluded_participants:
         print(f"IDs excluidos por celdas faltantes: {', '.join(excluded_participants)}")
@@ -294,6 +339,7 @@ def main() -> None:
     print("\nContrastes a priori:")
     print(contrasts.to_string(index=False))
     print("\nArchivos guardados:")
+    print(f"- Datos de entrada: {input_description}")
     if args.export_csv:
         print(f"- {cell_means_path}")
         print(f"- {desc_path}")
