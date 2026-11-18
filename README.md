@@ -41,6 +41,17 @@ python extractor.py
 
 El procesamiento que incorpora cuestionarios está en `process_data_with_personality.py`; la validación está en `validator.py`. Las variantes de la tarea están en `scripts/`.
 
+### Análisis H2: cambio de confianza
+
+El análisis de H2 usa el libro consolidado `ATC_EXTRACTOR/datos_combinados.xlsx` y guarda el informe, las tablas y las figuras en `ATC_EXTRACTOR/output/h2_trust_change/`. Con la venv activa, instala las dependencias del análisis y ejecútalo desde la raíz:
+
+```bash
+python -m pip install -r ATC_EXTRACTOR/requirements-analysis.txt
+python ATC_EXTRACTOR/h2_trust_analysis.py
+```
+
+El script compara el cambio de confianza entre ensayos consecutivos, dentro del mismo bloque, y clasifica el análisis principal por `correct` del ensayo actual. También incluye un análisis separado por `automation_error`, que describe si la sugerencia automática fue errónea.
+
 ## Preprocesamiento de eye tracking
 
 Ejecuta `Códigos para preprocesado/Preprocesado_ET.py`. El programa permite seleccionar un libro Excel y guarda junto a él otro libro con los datos limpios, parpadeos y sacadas.

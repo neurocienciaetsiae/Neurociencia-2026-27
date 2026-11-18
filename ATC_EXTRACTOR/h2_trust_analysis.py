@@ -104,6 +104,7 @@ def build_trial_deltas(data: pd.DataFrame) -> tuple[pd.DataFrame, dict[str, int]
     automated["prev_trust"] = grouped["trust"].shift(1)
     automated["prev_answer"] = grouped["answer"].shift(1)
     automated["prev_automation_error"] = grouped["automation_error"].shift(1)
+    automated["prev_correct"] = grouped["correct"].shift(1)
 
     adjacent = automated["trial"].sub(automated["prev_trial"]).eq(1)
     current_responded = automated["answer"].ne("no_response") & automated["answer"].notna()
@@ -111,11 +112,13 @@ def build_trial_deltas(data: pd.DataFrame) -> tuple[pd.DataFrame, dict[str, int]
     current_valid = (
         automated["trust"].notna()
         & automated["automation_error"].isin([0, 1])
+        & automated["correct"].isin([0, 1])
         & current_responded
     )
     previous_valid = (
         automated["prev_trust"].notna()
         & automated["prev_automation_error"].isin([0, 1])
+        & automated["prev_correct"].isin([0, 1])
         & previous_responded
     )
     keep = adjacent & current_valid & previous_valid
@@ -128,6 +131,7 @@ def build_trial_deltas(data: pd.DataFrame) -> tuple[pd.DataFrame, dict[str, int]
     counts["rows_missing_automation_error_in_automated_blocks"] = int(
         automated["automation_error"].isna().sum()
     )
+    counts["rows_missing_correct_in_automated_blocks"] = int(automated["correct"].isna().sum())
     counts["nonadjacent_rows"] = int((~adjacent).sum())
     counts["valid_deltas"] = int(keep.sum())
 
@@ -136,9 +140,13 @@ def build_trial_deltas(data: pd.DataFrame) -> tuple[pd.DataFrame, dict[str, int]
     deltas["automation_outcome"] = np.where(
         deltas["automation_error"].eq(0), "acierto", "fallo"
     )
+    deltas["participant_outcome"] = np.where(
+        deltas["correct"].eq(1), "acierto", "fallo"
+    )
     counts["participants_with_valid_deltas"] = int(deltas["participant"].nunique())
-    counts["valid_failure_deltas"] = int(deltas["automation_outcome"].eq("fallo").sum())
-    counts["valid_failure_deltas_outside_block_4"] = int(
+    counts["valid_correct_failure_deltas"] = int(deltas["participant_outcome"].eq("fallo").sum())
+    counts["valid_automation_error_deltas"] = int(deltas["automation_outcome"].eq("fallo").sum())
+    counts["automation_error_deltas_outside_block_4"] = int(
         deltas.loc[deltas["block"].ne(4), "automation_outcome"].eq("fallo").sum()
     )
     return deltas, counts
@@ -147,7 +155,7 @@ def build_trial_deltas(data: pd.DataFrame) -> tuple[pd.DataFrame, dict[str, int]
 def participant_condition_means(
     deltas: pd.DataFrame,
     group_keys: list[str],
-    outcome_column: str = "automation_outcome",
+    outcome_column: str = "participant_outcome",
 ) -> pd.DataFrame:
     means = (
         deltas.groupby(group_keys + [outcome_column], as_index=False, dropna=False)
@@ -277,10 +285,13 @@ def test_paired(participant_means: pd.DataFrame, label: str) -> dict[str, object
     return row
 
 
-def overall_trial_descriptives(deltas: pd.DataFrame) -> pd.DataFrame:
+def overall_trial_descriptives(
+    deltas: pd.DataFrame,
+    outcome_column: str = "participant_outcome",
+) -> pd.DataFrame:
     records = []
     for condition in ("acierto", "fallo"):
-        values = deltas.loc[deltas["automation_outcome"].eq(condition), "delta_trust"]
+        values = deltas.loc[deltas[outcome_column].eq(condition), "delta_trust"]
         records.append({"condition": condition, **describe_values(values)})
     return pd.DataFrame(records)
 
@@ -294,20 +305,26 @@ def write_results_workbook(
     participant_means: pd.DataFrame,
     exploratory: pd.DataFrame,
     exploratory_participants: pd.DataFrame,
+    automation_desc: pd.DataFrame,
+    automation_overall: dict[str, object],
+    automation_exploratory: pd.DataFrame,
+    automation_participants: pd.DataFrame,
 ) -> None:
     """Write all tabular analysis outputs to one formatted Excel workbook."""
     method = pd.DataFrame(
         [
             ("Fuente", "datos_combinados.xlsx · hoja TRIALS"),
-            ("Variable de resultado", "automation_error: 0 = acierto de automatización; 1 = fallo"),
+            ("Variable principal", "correct: 1 = respuesta del participante correcta; 0 = incorrecta"),
+            ("Análisis complementario", "automation_error: 0 = automatización correcta; 1 = sugerencia errónea"),
             ("Cambio de confianza", "trust_t − trust_(t−1), solo trials consecutivos dentro del mismo bloque"),
-            ("Alineación del evento", "El delta se clasifica con automation_error_t"),
+            ("Alineación del evento", "El análisis principal clasifica con correct_t; el complementario con automation_error_t"),
             ("Bloques incluidos", "2–5; se excluyen el bloque manual 1 y el bloque 6"),
             ("Filas fuente", counts["input_rows"]),
             ("Participantes con deltas válidos", counts["participants_with_valid_deltas"]),
             ("Deltas válidos", counts["valid_deltas"]),
-            ("Deltas tras acierto", int(deltas["automation_outcome"].eq("acierto").sum())),
-            ("Deltas tras fallo", counts["valid_failure_deltas"]),
+            ("Deltas tras respuesta correcta", int(deltas["participant_outcome"].eq("acierto").sum())),
+            ("Deltas tras fallo de participante", counts["valid_correct_failure_deltas"]),
+            ("Deltas tras error de automatización", counts["valid_automation_error_deltas"]),
             ("Participantes en prueba pareada", overall["n_participants_pairable"]),
             ("Media delta tras acierto por participante", overall["mean_delta_acierto"]),
             ("Media delta tras fallo por participante", overall["mean_delta_fallo"]),
@@ -323,7 +340,7 @@ def write_results_workbook(
             ("Wilcoxon W", overall["wilcoxon_w"]),
             ("Wilcoxon p (dos colas)", overall["wilcoxon_p_two_sided"]),
             ("Rank-biserial emparejada", overall["matched_pairs_rank_biserial"]),
-            ("Interpretación", "La confianza descendió tras fallos y quedó prácticamente estable tras aciertos; todos los fallos con delta válido fueron en el bloque 4."),
+            ("Interpretación", "El análisis principal compara respuestas correctas e incorrectas del participante; automation_error mide por separado si la sugerencia automática fue errónea."),
         ],
         columns=["elemento", "resultado"],
     )
@@ -340,6 +357,10 @@ def write_results_workbook(
         "participantes_fase_bloque": exploratory_participants,
         "deltas_trial": deltas,
         "control_calidad": quality,
+        "sens_automation_error": pd.DataFrame([automation_overall]),
+        "sens_auto_descriptivos": automation_desc,
+        "sens_auto_fase_bloque": automation_exploratory,
+        "sens_auto_participantes": automation_participants,
     }
 
     with pd.ExcelWriter(output_path, engine="openpyxl") as writer:
@@ -370,7 +391,10 @@ def write_results_workbook(
 
 
 
-def exploratory_stats(deltas: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
+def exploratory_stats(
+    deltas: pd.DataFrame,
+    outcome_column: str = "participant_outcome",
+) -> tuple[pd.DataFrame, pd.DataFrame]:
     records: list[dict[str, object]] = []
     participant_frames: list[pd.DataFrame] = []
     for phase, block in sorted(
@@ -378,7 +402,7 @@ def exploratory_stats(deltas: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]
         key=lambda item: (str(item[0]), int(item[1])),
     ):
         subset = deltas.loc[deltas["phase"].eq(phase) & deltas["block"].eq(block)]
-        means = participant_condition_means(subset, ["participant"])
+        means = participant_condition_means(subset, ["participant"], outcome_column)
         means.insert(0, "block", block)
         means.insert(0, "phase", phase)
         participant_frames.append(means)
@@ -386,7 +410,7 @@ def exploratory_stats(deltas: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]
         record["phase"] = phase
         record["block"] = int(block)
         for condition in ("acierto", "fallo"):
-            values = subset.loc[subset["automation_outcome"].eq(condition), "delta_trust"]
+            values = subset.loc[subset[outcome_column].eq(condition), "delta_trust"]
             summary = describe_values(values)
             record.update({f"trial_{condition}_{key}": value for key, value in summary.items()})
         records.append(record)
@@ -430,7 +454,7 @@ def save_figures(
     ax.axhline(0, color="#4b5563", linewidth=0.8, alpha=0.7)
     ax.grid(axis="y", color="#d8dce2", linewidth=0.7)
     ax.spines[["top", "right"]].set_visible(False)
-    fig.suptitle(f"H2 · automatización · n = {len(paired)} participantes", y=1.02)
+    fig.suptitle(f"H2 · respuesta del participante · n = {len(paired)} participantes", y=1.02)
     fig.tight_layout()
     paired_path = output_dir / "h2_paired_change.png"
     fig.savefig(paired_path, dpi=180, bbox_inches="tight")
@@ -482,6 +506,7 @@ def write_report(
     trial_desc: pd.DataFrame,
     overall: dict[str, object],
     exploratory: pd.DataFrame,
+    automation_overall: dict[str, object],
     paired_figure: Path,
     diagnostic_figure: Path,
 ) -> None:
@@ -517,6 +542,17 @@ def write_report(
     else:
         normality = "Shapiro–Wilk no se pudo calcular porque hay menos de tres diferencias pareadas."
 
+    automation_sensitivity_text = (
+        f"Con `automation_error`, la diferencia media acierto − fallo fue "
+        f"{format_number(automation_overall['mean_difference_acierto_minus_fallo'])} puntos "
+        f"(n = {int(automation_overall['n_participants_pairable'])}; "
+        f"t({int(automation_overall['df'])}) = {format_number(automation_overall['t'])}, "
+        f"p {format_p(automation_overall['t_p_two_sided'])}; Wilcoxon p "
+        f"{format_p(automation_overall['wilcoxon_p_two_sided'])}). "
+        f"Hubo {counts['valid_automation_error_deltas']} deltas tras una sugerencia errónea, "
+        f"{counts['automation_error_deltas_outside_block_4']} fuera del bloque 4."
+    )
+
     exploratory_lines = [
         "| Fase | Bloque | Pares | Δ tras acierto (media) | Δ tras fallo (media) | Diferencia media | t | p t | W | p Wilcoxon |",
         "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
@@ -530,21 +566,21 @@ def write_report(
             f"{format_p(row['wilcoxon_p_two_sided'])} |"
         )
 
-    report = f"""# H2 — Cambio de confianza tras aciertos y fallos de la automatización
+    report = f"""# H2 — Cambio de confianza tras respuestas correctas e incorrectas
 
 ## Datos y definición
 
-Fuente: `{source_label}` (hoja `TRIALS`, {counts['input_rows']} filas; {counts['participants_with_valid_deltas']} participantes con deltas válidos). Se usó el libro consolidado existente; `ATC_EXTRACTOR/unir_excel.py` es el proceso del repo que apila los Excel individuales. No se encontró en el repo otra convención o análisis previo de H2 ni material CRID o plantilla de informe; para recomendar prueba se aplica la regla estándar de Shapiro–Wilk con α = 0,05. La variable principal es `automation_error`: 0 = acierto de la automatización; 1 = fallo. `correct` describe el desempeño del participante y no define H2; no se hizo análisis de sensibilidad con `correct` al no encontrarse una convención alternativa que genere ambigüedad.
+Fuente: `{source_label}` (hoja `TRIALS`, {counts['input_rows']} filas; {counts['participants_with_valid_deltas']} participantes con deltas válidos). Se usó el libro consolidado existente; `ATC_EXTRACTOR/unir_excel.py` es el proceso del repo que apila los Excel individuales. No se encontró en el repo otra convención o análisis previo de H2 ni material CRID o plantilla de informe; para recomendar prueba se aplica la regla estándar de Shapiro–Wilk con α = 0,05. La variable principal es `correct`: 1 = respuesta del participante correcta; 0 = incorrecta. `automation_error` se presenta aparte y mide si la sugerencia automática fue errónea.
 
-Se excluyeron el bloque manual 1 y los bloques fuera del intervalo automatizado 2–5 (incluido el bloque 6 que aparece en algunos archivos, porque no forma parte de los cuatro bloques descritos para el experimento). Se descartaron pares de ensayos con `answer = no_response`, `trust` o `automation_error` ausente, o con números de trial no consecutivos. Se requieren dos respuestas de confianza válidas para calcular cada cambio.
+Se excluyeron el bloque manual 1 y los bloques fuera del intervalo automatizado 2–5 (incluido el bloque 6 que aparece en algunos archivos, porque no forma parte de los cuatro bloques descritos para el experimento). Se descartaron pares de ensayos con `answer = no_response`, `trust`, `correct` o `automation_error` ausente, o con números de trial no consecutivos. Se requieren dos respuestas de confianza válidas para calcular cada cambio.
 
-**Convención temporal:** para el trial consecutivo t, `delta_trust = trust_t − trust_(t−1)` y el cambio se clasifica con `automation_error_t`, el resultado del trial t, después del cual se registró `trust_t`. El emparejamiento se hace dentro de cada participante, sesión, fase y bloque; nunca cruza límites de bloque.
+**Convención temporal:** para el trial consecutivo t, `delta_trust = trust_t − trust_(t−1)` y el análisis principal se clasifica con `correct_t`, la respuesta del participante en el ensayo t, después del cual se registró `trust_t`. El análisis complementario se clasifica con `automation_error_t`. El emparejamiento se hace dentro de cada participante, sesión, fase y bloque; nunca cruza límites de bloque.
 
-En los bloques automatizados había {counts['automated_rows']} filas: {counts['no_response_rows_in_automated_blocks']} con `no_response`, {counts['rows_missing_trust_in_automated_blocks']} sin confianza y {counts['rows_missing_automation_error_in_automated_blocks']} sin `automation_error`. Se conservaron {counts['valid_deltas']} deltas válidos, incluidos {counts['valid_failure_deltas']} tras fallos. Para la prueba pareada global se incluyeron {int(overall['n_participants_pairable'])} participantes; {int(overall['n_participants_without_both_conditions'])} no tenían ambas condiciones y se excluyeron de la comparación pareada.
+En los bloques automatizados había {counts['automated_rows']} filas: {counts['no_response_rows_in_automated_blocks']} con `no_response`, {counts['rows_missing_trust_in_automated_blocks']} sin confianza, {counts['rows_missing_correct_in_automated_blocks']} sin `correct` y {counts['rows_missing_automation_error_in_automated_blocks']} sin `automation_error`. Se conservaron {counts['valid_deltas']} deltas válidos, incluidos {counts['valid_correct_failure_deltas']} tras una respuesta incorrecta. Para la prueba pareada global se incluyeron {int(overall['n_participants_pairable'])} participantes; {int(overall['n_participants_without_both_conditions'])} no tenían ambas condiciones y se excluyeron de la comparación pareada.
 
 ## Descriptivos de cambios por ensayo
 
-| Resultado de automatización | N deltas | Media | DE | Mediana | Q1 | Q3 | IQR |
+| Resultado de la respuesta del participante | N deltas | Media | DE | Mediana | Q1 | Q3 | IQR |
 |---|---:|---:|---:|---:|---:|---:|---:|
 {chr(10).join(trial_rows)}
 
@@ -567,7 +603,11 @@ Las medias se calcularon por participante y condición agrupando fases y bloques
 | Correlación rank-biserial emparejada | {format_number(overall['matched_pairs_rank_biserial'])} |
 | Prueba recomendada por Shapiro–Wilk | {overall['recommended_primary_test']} |
 
-**Interpretación:** {overall_text} {normality} En promedio, la confianza descendió tras fallos, mientras que tras aciertos permaneció prácticamente estable; por tanto, los datos respaldan que el cambio es más positivo tras un acierto que tras un fallo, pero no muestran un aumento claro tras aciertos. Los {counts['valid_failure_deltas']} deltas válidos tras fallos ocurrieron en el bloque 4 ({counts['valid_failure_deltas_outside_block_4']} en otros bloques); como los aciertos también proceden de los bloques 2, 3 y 5, el contraste global está parcialmente confundido con el bloque. La comparación exploratoria dentro del bloque 4 también muestra mayor cambio tras acierto que tras fallo.
+**Interpretación:** {overall_text} {normality} En promedio, la confianza descendió tras respuestas incorrectas y permaneció prácticamente estable tras respuestas correctas; por tanto, los datos respaldan que el cambio es más positivo tras un acierto que tras un fallo, pero no muestran un aumento claro tras los aciertos.
+
+## Análisis complementario con `automation_error`
+
+Este análisis responde a otra pregunta: cómo cambia la confianza tras una sugerencia automática correcta o errónea. {automation_sensitivity_text} La tabla por fase y bloque para esta variable también se guarda en el libro Excel.
 
 ## Exploratorio por fase y bloque
 
@@ -583,7 +623,7 @@ Las comparaciones por celda son exploratorias; los valores p no se ajustaron por
 
 ## Archivos de apoyo
 
-- `h2_results.xlsx`: resultados tabulares en las hojas `informe`, `contraste_global`, `descriptivos_delta`, `participantes`, `fase_bloque`, `participantes_fase_bloque`, `deltas_trial` y `control_calidad`.
+- `h2_results.xlsx`: resultados principales tabulares en hojas que usan `correct` y análisis complementarios de `automation_error` en las hojas `sens_*`.
 """
     report_path.write_text(report, encoding="utf-8")
 
@@ -596,11 +636,20 @@ def main() -> None:
     if deltas.empty:
         raise ValueError("No quedan deltas válidos. Revisa TRIALS y los criterios de exclusión.")
 
-    participant_means = participant_condition_means(deltas, ["participant"])
+    participant_means = participant_condition_means(deltas, ["participant"], "participant_outcome")
     paired = participant_means.loc[participant_means["pairable"]].copy()
-    overall_desc = overall_trial_descriptives(deltas)
+    overall_desc = overall_trial_descriptives(deltas, "participant_outcome")
     overall = test_paired(participant_means, "global")
-    exploratory, exploratory_participants = exploratory_stats(deltas)
+    exploratory, exploratory_participants = exploratory_stats(deltas, "participant_outcome")
+
+    automation_participants = participant_condition_means(
+        deltas, ["participant"], "automation_outcome"
+    )
+    automation_desc = overall_trial_descriptives(deltas, "automation_outcome")
+    automation_overall = test_paired(automation_participants, "automation_error_sensitivity")
+    automation_exploratory, automation_exploratory_participants = exploratory_stats(
+        deltas, "automation_outcome"
+    )
 
     paired_path, diagnostic_path = save_figures(paired, overall, args.output_dir)
     workbook_path = args.output_dir / "h2_results.xlsx"
@@ -613,6 +662,10 @@ def main() -> None:
         participant_means,
         exploratory,
         exploratory_participants,
+        automation_desc,
+        automation_overall,
+        automation_exploratory,
+        automation_participants,
     )
     # Remove the CSV exports produced by earlier script versions in this folder.
     for stale_csv in args.output_dir.glob("h2_*.csv"):
@@ -624,15 +677,16 @@ def main() -> None:
         overall_desc,
         overall,
         exploratory,
+        automation_overall,
         paired_path,
         diagnostic_path,
     )
 
-    print("=== H2: Cambio de confianza tras el resultado de la automatización ===")
+    print("=== H2: Cambio de confianza tras respuestas correctas e incorrectas ===")
     print(f"Entrada: {args.input_file}")
     print(f"Deltas válidos: {len(deltas)}")
     print(f"Participantes con pares válidos: {int(overall['n_participants_pairable'])}")
-    print(f"Δ media acierto − fallo: {format_number(overall['mean_difference_acierto_minus_fallo'])}")
+    print(f"Δ media respuesta correcta − incorrecta: {format_number(overall['mean_difference_acierto_minus_fallo'])}")
     print(f"t({int(overall['df'])}) = {format_number(overall['t'])}, p {format_p(overall['t_p_two_sided'])}")
     print(f"Shapiro p {format_p(overall['shapiro_p'])}; recomendado: {overall['recommended_primary_test']}")
     print(f"Libro Excel: {workbook_path}")
