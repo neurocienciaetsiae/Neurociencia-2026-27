@@ -50,7 +50,7 @@ python -m pip install -r ATC_EXTRACTOR/requirements-analysis.txt
 python ATC_EXTRACTOR/h2_trust_analysis.py
 ```
 
-El script compara el cambio de confianza entre ensayos consecutivos, dentro del mismo bloque, y clasifica el análisis principal por `correct` del ensayo actual. También incluye un análisis separado por `automation_error`, que describe si la sugerencia automática fue errónea.
+H2 usa `correct` como resultado principal (`1` correcto, `0` incorrecto); los valores distintos de ambos, incluidos timeouts, se tratan como fallos cuando hay datos de confianza utilizables. También informa por separado el análisis con `automation_error`.
 
 ## Preprocesamiento de eye tracking
 

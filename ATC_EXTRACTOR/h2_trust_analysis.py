@@ -107,18 +107,22 @@ def build_trial_deltas(data: pd.DataFrame) -> tuple[pd.DataFrame, dict[str, int]
     automated["prev_correct"] = grouped["correct"].shift(1)
 
     adjacent = automated["trial"].sub(automated["prev_trial"]).eq(1)
-    current_responded = automated["answer"].ne("no_response") & automated["answer"].notna()
-    previous_responded = automated["prev_answer"].ne("no_response") & automated["prev_answer"].notna()
+    current_timeout = ~automated["correct"].isin([0, 1])
+    previous_timeout = ~automated["prev_correct"].isin([0, 1])
+    current_responded = (
+        automated["answer"].ne("no_response") & automated["answer"].notna()
+    ) | current_timeout
+    previous_responded = (
+        automated["prev_answer"].ne("no_response") & automated["prev_answer"].notna()
+    ) | previous_timeout
     current_valid = (
         automated["trust"].notna()
         & automated["automation_error"].isin([0, 1])
-        & automated["correct"].isin([0, 1])
         & current_responded
     )
     previous_valid = (
         automated["prev_trust"].notna()
         & automated["prev_automation_error"].isin([0, 1])
-        & automated["prev_correct"].isin([0, 1])
         & previous_responded
     )
     keep = adjacent & current_valid & previous_valid
@@ -132,6 +136,9 @@ def build_trial_deltas(data: pd.DataFrame) -> tuple[pd.DataFrame, dict[str, int]
         automated["automation_error"].isna().sum()
     )
     counts["rows_missing_correct_in_automated_blocks"] = int(automated["correct"].isna().sum())
+    counts["nonbinary_correct_rows_in_automated_blocks"] = int(
+        (~automated["correct"].isin([0, 1])).sum()
+    )
     counts["nonadjacent_rows"] = int((~adjacent).sum())
     counts["valid_deltas"] = int(keep.sum())
 
@@ -145,6 +152,9 @@ def build_trial_deltas(data: pd.DataFrame) -> tuple[pd.DataFrame, dict[str, int]
     )
     counts["participants_with_valid_deltas"] = int(deltas["participant"].nunique())
     counts["valid_correct_failure_deltas"] = int(deltas["participant_outcome"].eq("fallo").sum())
+    counts["valid_nonbinary_correct_deltas_as_failure"] = int(
+        (~deltas["correct"].isin([0, 1])).sum()
+    )
     counts["valid_automation_error_deltas"] = int(deltas["automation_outcome"].eq("fallo").sum())
     counts["automation_error_deltas_outside_block_4"] = int(
         deltas.loc[deltas["block"].ne(4), "automation_outcome"].eq("fallo").sum()
@@ -315,6 +325,7 @@ def write_results_workbook(
         [
             ("Fuente", "datos_combinados.xlsx · hoja TRIALS"),
             ("Variable principal", "correct: 1 = respuesta del participante correcta; 0 = incorrecta"),
+            ("Timeout en correct", "Cualquier valor distinto de 0/1 (incluido un valor ausente) se clasifica como fallo si trust y automation_error están disponibles"),
             ("Análisis complementario", "automation_error: 0 = automatización correcta; 1 = sugerencia errónea"),
             ("Cambio de confianza", "trust_t − trust_(t−1), solo trials consecutivos dentro del mismo bloque"),
             ("Alineación del evento", "El análisis principal clasifica con correct_t; el complementario con automation_error_t"),
@@ -572,11 +583,11 @@ def write_report(
 
 Fuente: `{source_label}` (hoja `TRIALS`, {counts['input_rows']} filas; {counts['participants_with_valid_deltas']} participantes con deltas válidos). Se usó el libro consolidado existente; `ATC_EXTRACTOR/unir_excel.py` es el proceso del repo que apila los Excel individuales. No se encontró en el repo otra convención o análisis previo de H2 ni material CRID o plantilla de informe; para recomendar prueba se aplica la regla estándar de Shapiro–Wilk con α = 0,05. La variable principal es `correct`: 1 = respuesta del participante correcta; 0 = incorrecta. `automation_error` se presenta aparte y mide si la sugerencia automática fue errónea.
 
-Se excluyeron el bloque manual 1 y los bloques fuera del intervalo automatizado 2–5 (incluido el bloque 6 que aparece en algunos archivos, porque no forma parte de los cuatro bloques descritos para el experimento). Se descartaron pares de ensayos con `answer = no_response`, `trust`, `correct` o `automation_error` ausente, o con números de trial no consecutivos. Se requieren dos respuestas de confianza válidas para calcular cada cambio.
+Se excluyó el bloque manual 1 y se analizaron los bloques automatizados 2–5. Se descartaron pares no consecutivos y los que no tienen `trust` o `automation_error`. `correct = 1` se clasifica como acierto; `correct = 0` como fallo. Si `correct` tiene un valor distinto de 0/1 (incluido timeout o valor ausente), ese ensayo se clasifica como fallo y se conserva si tiene `trust` y `automation_error` válidos, incluso si `answer = no_response`. Los `answer = no_response` binarios se excluyen.
 
 **Convención temporal:** para el trial consecutivo t, `delta_trust = trust_t − trust_(t−1)` y el análisis principal se clasifica con `correct_t`, la respuesta del participante en el ensayo t, después del cual se registró `trust_t`. El análisis complementario se clasifica con `automation_error_t`. El emparejamiento se hace dentro de cada participante, sesión, fase y bloque; nunca cruza límites de bloque.
 
-En los bloques automatizados había {counts['automated_rows']} filas: {counts['no_response_rows_in_automated_blocks']} con `no_response`, {counts['rows_missing_trust_in_automated_blocks']} sin confianza, {counts['rows_missing_correct_in_automated_blocks']} sin `correct` y {counts['rows_missing_automation_error_in_automated_blocks']} sin `automation_error`. Se conservaron {counts['valid_deltas']} deltas válidos, incluidos {counts['valid_correct_failure_deltas']} tras una respuesta incorrecta. Para la prueba pareada global se incluyeron {int(overall['n_participants_pairable'])} participantes; {int(overall['n_participants_without_both_conditions'])} no tenían ambas condiciones y se excluyeron de la comparación pareada.
+En los bloques automatizados había {counts['automated_rows']} filas: {counts['no_response_rows_in_automated_blocks']} con `no_response`, {counts['rows_missing_trust_in_automated_blocks']} sin confianza, {counts['rows_missing_correct_in_automated_blocks']} sin `correct` y {counts['rows_missing_automation_error_in_automated_blocks']} sin `automation_error`. Se conservaron {counts['valid_deltas']} deltas válidos, incluidos {counts['valid_correct_failure_deltas']} tras una respuesta incorrecta y {counts['valid_nonbinary_correct_deltas_as_failure']} por un valor no binario/timeout en `correct` clasificado como fallo. Para la prueba pareada global se incluyeron {int(overall['n_participants_pairable'])} participantes; {int(overall['n_participants_without_both_conditions'])} no tenían ambas condiciones y se excluyeron de la comparación pareada.
 
 ## Descriptivos de cambios por ensayo
 
